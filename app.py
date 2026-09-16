@@ -35,20 +35,4 @@ def answer_question(question: str) -> str:
         "stream": False,
     }
     try:
-        resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
-        resp.raise_for_status()
-        return resp.json()["message"]["content"].strip()
-    except Exception as e:
-        # Surface the real error in the UI instead of a blank "Error" bubble.
-        return f"[REQUEST FAILED] {type(e).__name__}: {e}"
-
-
-demo = gr.Interface(
-    fn=answer_question,
-    inputs=gr.Textbox(label="Ask a question", placeholder="e.g. What is the capital of France?"),
-    outputs=gr.Textbox(label="Answer"),
-    title="Mini QA Assistant (Qwen2.5-3B via Ollama)",
-    description="Ask any question and get an answer.",
-)
-
-demo.launch(share=True, debug=False)
+        resp = requests.post(OLLAMA_URL, json=payload,
