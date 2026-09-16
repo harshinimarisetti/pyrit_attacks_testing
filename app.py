@@ -34,9 +34,13 @@ def answer_question(question: str) -> str:
         ],
         "stream": False,
     }
-    resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
-    resp.raise_for_status()
-    return resp.json()["message"]["content"].strip()
+    try:
+        resp = requests.post(OLLAMA_URL, json=payload, timeout=120)
+        resp.raise_for_status()
+        return resp.json()["message"]["content"].strip()
+    except Exception as e:
+        # Surface the real error in the UI instead of a blank "Error" bubble.
+        return f"[REQUEST FAILED] {type(e).__name__}: {e}"
 
 
 demo = gr.Interface(
