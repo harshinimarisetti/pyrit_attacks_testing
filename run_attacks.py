@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 nest_asyncio.apply()
 
-from pyrit.common import IN_MEMORY, initialize_pyrit
+from pyrit.common import initialize_pyrit
 from pyrit.orchestrator import PromptSendingOrchestrator
 from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.prompt_converter import Base64Converter, ROT13Converter, LeetspeakConverter
