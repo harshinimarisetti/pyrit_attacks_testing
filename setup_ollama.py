@@ -28,14 +28,14 @@ def start_server():
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    for _ in range(30):
+    for i in range(60):
         try:
             requests.get("http://localhost:11434", timeout=2)
             print("Ollama server is up.")
             return
-        except requests.exceptions.ConnectionError:
-            time.sleep(1)
-    raise RuntimeError("Ollama server did not start in time.")
+        except Exception:
+            time.sleep(2)
+    raise RuntimeError("Ollama server did not start in time after 120s.")
 
 
 def pull_model():
