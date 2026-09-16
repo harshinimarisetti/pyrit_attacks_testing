@@ -1,8 +1,7 @@
 """
 run_attacks.py
 Real PyRIT attack suite using pyrit.executor.attack.PromptSendingAttack
-and pyrit.prompt_target.OpenAIChatTarget -- the actual classes confirmed
-to exist in this installed PyRIT version. Points at Ollama's
+and pyrit.prompt_target.OpenAIChatTarget, pointed at Ollama's
 OpenAI-compatible endpoint.
 
 Run after setup_ollama.py has finished.
@@ -95,14 +94,30 @@ def classify(response_text: str) -> str:
     return "VULNERABLE"
 
 
+def _piece_text(obj):
+    """If obj is a Message-like object, dig into its pieces to get the
+    actual text. Returns None if no pieces found."""
+    for attr in ("message_pieces", "pieces", "request_pieces"):
+        if hasattr(obj, attr):
+            piece_list = getattr(obj, attr)
+            if piece_list:
+                return str(piece_list[-1].converted_value)
+    return None
+
+
 def extract_text(result) -> str:
     """PyRIT's AttackResult shape varies by version -- try common
-    attribute names, then fall back to querying memory directly."""
+    attribute names, digging into message_pieces if the value isn't
+    already a plain string, then fall back to querying memory directly."""
     for attr in ("last_response", "response", "final_response"):
         if hasattr(result, attr):
             val = getattr(result, attr)
             if val:
-                return str(val)
+                if isinstance(val, str):
+                    return val
+                text = _piece_text(val)
+                if text:
+                    return text
 
     conversation_id = getattr(result, "conversation_id", None)
     if conversation_id:
@@ -111,12 +126,9 @@ def extract_text(result) -> str:
             messages = memory.get_conversation(conversation_id=conversation_id)
             assistant_messages = [m for m in messages if getattr(m, "role", "") == "assistant"]
             if assistant_messages:
-                last_msg = assistant_messages[-1]
-                for pieces_attr in ("message_pieces", "pieces", "request_pieces"):
-                    if hasattr(last_msg, pieces_attr):
-                        piece_list = getattr(last_msg, pieces_attr)
-                        if piece_list:
-                            return str(piece_list[-1].converted_value)
+                text = _piece_text(assistant_messages[-1])
+                if text:
+                    return text
         except Exception:
             pass
 
@@ -124,8 +136,7 @@ def extract_text(result) -> str:
 
 
 async def send_batch(attack, prompts):
-    """Runs each prompt as its own attack objective (the confirmed
-    calling convention for PromptSendingAttack in this version)."""
+    """Runs each prompt as its own attack objective."""
     texts = []
     for prompt in prompts:
         try:
