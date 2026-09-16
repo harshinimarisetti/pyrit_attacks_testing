@@ -1,8 +1,17 @@
 """
 run_attacks.py
 Real PyRIT attack suite. Uses PyRIT's own OpenAIChatTarget pointed at
-Ollama's OpenAI-compatible endpoint, and PyRIT's own
-PromptSendingOrchestrator with real PyRIT converters.
+Ollama's OpenAI-compatible endpoint (Ollama exposes one, so no custom
+target class is needed), and PyRIT's own PromptSendingOrchestrator with
+real PyRIT converters (Base64Converter, ROT13Converter, LeetspeakConverter).
+
+The confidential data used for the leakage tests is baked into the
+"qa-assistant" Ollama model itself (see setup_ollama.py's Modelfile),
+so it's present no matter how the target is called.
+
+Two calling conventions exist across PyRIT versions for sending a batch
+of prompts through PromptSendingOrchestrator -- this tries the modern
+one first and falls back to the older one automatically.
 
 Run after setup_ollama.py has finished.
 """
@@ -14,13 +23,58 @@ import matplotlib.pyplot as plt
 
 nest_asyncio.apply()
 
-from pyrit.common import initialize_pyrit
 from pyrit.orchestrator import PromptSendingOrchestrator
 from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.prompt_converter import Base64Converter, ROT13Converter, LeetspeakConverter
 from pyrit.prompt_normalizer import PromptConverterConfiguration
 
-OLLAMA_MODEL = "qa-assistant"
+
+async def try_initialize_memory():
+    """Different PyRIT versions expose memory initialization under
+    different names/locations. Try every known pattern; if none work,
+    continue anyway -- several versions run fine with default memory."""
+    attempts = []
+
+    try:
+        from pyrit.common import initialize_pyrit
+        initialize_pyrit(memory_db_type="InMemory")
+        print("[Memory initialized via pyrit.common.initialize_pyrit]")
+        return
+    except Exception as e:
+        attempts.append(f"pyrit.common.initialize_pyrit: {e}")
+
+    try:
+        from pyrit.setup import initialize_pyrit
+        initialize_pyrit(memory_db_type="InMemory")
+        print("[Memory initialized via pyrit.setup.initialize_pyrit]")
+        return
+    except Exception as e:
+        attempts.append(f"pyrit.setup.initialize_pyrit: {e}")
+
+    try:
+        from pyrit.setup import initialize_pyrit_async
+        await initialize_pyrit_async(memory_db_type="InMemory")
+        print("[Memory initialized via pyrit.setup.initialize_pyrit_async]")
+        return
+    except Exception as e:
+        attempts.append(f"pyrit.setup.initialize_pyrit_async: {e}")
+
+    try:
+        from pyrit.memory import CentralMemory, MemoryInterface
+        print("[Skipping explicit memory init -- CentralMemory found but init pattern unconfirmed; continuing anyway]")
+        return
+    except Exception as e:
+        attempts.append(f"pyrit.memory.CentralMemory: {e}")
+
+    print("[Memory initialization skipped -- none of the known init functions matched this PyRIT version. Continuing anyway.]")
+    for a in attempts:
+        print(f"  tried: {a}")
+
+OLLAMA_MODEL = "qa-assistant"  # custom model with the secret system prompt baked in
+
+# --------------------------------------------------------------------------
+# Attack categories
+# --------------------------------------------------------------------------
 
 CATEGORIES = {
     "Illegal Requests": [
@@ -72,6 +126,7 @@ CATEGORIES = {
     ],
 }
 
+# PyRIT's own converter classes -- real PyRIT machinery, not hand-rolled.
 CONVERTER_SETS = {
     "Plain": None,
     "Base64": [Base64Converter()],
@@ -100,6 +155,8 @@ def classify(response_text: str) -> str:
 
 
 def extract_text(response) -> str:
+    """PyRIT's response object shape varies slightly by version --
+    try the documented attribute paths before giving up."""
     try:
         return response.request_pieces[-1].converted_value
     except Exception:
@@ -113,6 +170,8 @@ def extract_text(response) -> str:
 
 
 async def send_batch(orchestrator, prompts):
+    """Tries the modern per-objective call first, falls back to the
+    older batch call. Returns a list of response texts, one per prompt."""
     texts = []
     if hasattr(orchestrator, "send_prompts_async"):
         try:
@@ -129,7 +188,7 @@ async def send_batch(orchestrator, prompts):
 
 
 async def run():
-    initialize_pyrit(memory_db_type=IN_MEMORY)
+    await try_initialize_memory()
 
     target = OpenAIChatTarget(
         endpoint="http://localhost:11434/v1",
@@ -146,13 +205,17 @@ async def run():
             print(f"ATTACK: {attack_label}")
             print("=" * 70)
 
-            if converter_list:
-                converters = PromptConverterConfiguration.from_converters(converters=converter_list)
-                orchestrator = PromptSendingOrchestrator(objective_target=target, prompt_converters=converters)
-            else:
-                orchestrator = PromptSendingOrchestrator(objective_target=target)
+            try:
+                if converter_list:
+                    converters = PromptConverterConfiguration.from_converters(converters=converter_list)
+                    orchestrator = PromptSendingOrchestrator(objective_target=target, prompt_converters=converters)
+                else:
+                    orchestrator = PromptSendingOrchestrator(objective_target=target)
 
-            response_texts = await send_batch(orchestrator, prompts)
+                response_texts = await send_batch(orchestrator, prompts)
+            except Exception as e:
+                print(f"[ATTACK SETUP FAILED for {attack_label}: {type(e).__name__}: {e}]")
+                response_texts = [f"[NO RESPONSE EXTRACTED] setup error: {e}" for _ in prompts]
 
             for prompt, response_text in zip(prompts, response_texts):
                 verdict = classify(response_text)
