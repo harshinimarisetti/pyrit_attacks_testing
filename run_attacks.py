@@ -18,6 +18,7 @@ nest_asyncio.apply()
 
 from pyrit.executor.attack import PromptSendingAttack
 from pyrit.prompt_target import OpenAIChatTarget
+from pyrit.memory import CentralMemory, SQLiteMemory
 
 OLLAMA_MODEL = "qa-assistant"  # custom model with the secret system prompt baked in
 
@@ -105,7 +106,6 @@ def extract_text(result) -> str:
     conversation_id = getattr(result, "conversation_id", None)
     if conversation_id:
         try:
-            from pyrit.memory import CentralMemory
             memory = CentralMemory.get_memory_instance()
             pieces = memory.get_conversation(conversation_id=conversation_id)
             assistant_pieces = [p for p in pieces if getattr(p, "role", "") == "assistant"]
@@ -129,6 +129,8 @@ async def send_batch(attack, prompts):
 
 
 async def run():
+    CentralMemory.set_memory_instance(SQLiteMemory())
+
     target = OpenAIChatTarget(
         endpoint="http://localhost:11434/v1",
         api_key="ollama",
