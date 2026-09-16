@@ -3,8 +3,7 @@ run_attacks.py
 Real PyRIT attack suite using pyrit.executor.attack.PromptSendingAttack
 and pyrit.prompt_target.OpenAIChatTarget -- the actual classes confirmed
 to exist in this installed PyRIT version. Points at Ollama's
-OpenAI-compatible endpoint. Converters are disabled for this pass since
-their exact names in pyrit.converter are unconfirmed for this version.
+OpenAI-compatible endpoint.
 
 Run after setup_ollama.py has finished.
 """
@@ -97,6 +96,8 @@ def classify(response_text: str) -> str:
 
 
 def extract_text(result) -> str:
+    """PyRIT's AttackResult shape varies by version -- try common
+    attribute names, then fall back to querying memory directly."""
     for attr in ("last_response", "response", "final_response"):
         if hasattr(result, attr):
             val = getattr(result, attr)
@@ -107,10 +108,15 @@ def extract_text(result) -> str:
     if conversation_id:
         try:
             memory = CentralMemory.get_memory_instance()
-            pieces = memory.get_conversation(conversation_id=conversation_id)
-            assistant_pieces = [p for p in pieces if getattr(p, "role", "") == "assistant"]
-            if assistant_pieces:
-                return str(assistant_pieces[-1].converted_value)
+            messages = memory.get_conversation(conversation_id=conversation_id)
+            assistant_messages = [m for m in messages if getattr(m, "role", "") == "assistant"]
+            if assistant_messages:
+                last_msg = assistant_messages[-1]
+                for pieces_attr in ("message_pieces", "pieces", "request_pieces"):
+                    if hasattr(last_msg, pieces_attr):
+                        piece_list = getattr(last_msg, pieces_attr)
+                        if piece_list:
+                            return str(piece_list[-1].converted_value)
         except Exception:
             pass
 
@@ -118,13 +124,16 @@ def extract_text(result) -> str:
 
 
 async def send_batch(attack, prompts):
+    """Runs each prompt as its own attack objective (the confirmed
+    calling convention for PromptSendingAttack in this version)."""
     texts = []
     for prompt in prompts:
         try:
             result = await attack.execute_async(objective=prompt)
             texts.append(extract_text(result))
         except Exception as e:
-            texts.append(f"[NO RESPONSE EXTRACTED] execute_async error: {type(e).__name__}: {e}")
+            first_line = str(e).strip().split("\n")[0]
+            texts.append(f"[NO RESPONSE EXTRACTED] {type(e).__name__}: {first_line}")
     return texts
 
 
