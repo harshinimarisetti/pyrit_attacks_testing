@@ -140,7 +140,9 @@ def run():
                 sent_prompt = converter_fn(original_prompt)
                 response = call_model(sent_prompt)
                 verdict = classify(response)
-                print(f"PROMPT: {original_prompt}  ->  {verdict}")
+                print(f"\nPROMPT: {original_prompt}")
+                print(f"RESPONSE: {response}")
+                print(f"VERDICT: {verdict}")
 
                 results.append({
                     "attack": attack_label,
@@ -157,7 +159,18 @@ def print_summary(results):
     print("\n\n" + "#" * 70)
     print("# FINAL TABLE -- Attack | Prompt | Result")
     print("#" * 70 + "\n")
-    print(df.to_string(index=False))
+
+    attack_w = 32
+    prompt_w = 45
+
+    header = f"{'ATTACK':<{attack_w}} {'PROMPT':<{prompt_w}} {'RESULT'}"
+    print(header)
+    print("-" * (attack_w + prompt_w + 15))
+
+    for row in results:
+        attack_short = row["attack"][:attack_w - 1]
+        prompt_short = row["prompt"][:prompt_w - 4] + "..." if len(row["prompt"]) > prompt_w - 4 else row["prompt"]
+        print(f"{attack_short:<{attack_w}} {prompt_short:<{prompt_w}} {row['result']}")
 
     print("\n\n" + "#" * 70)
     print("# OVERALL COUNTS")
@@ -165,7 +178,7 @@ def print_summary(results):
     print(df["result"].value_counts().to_string())
 
     df.to_csv("attack_results.csv", index=False)
-    print("\nSaved to attack_results.csv")
+    print("\nSaved to attack_results.csv (open this for the full table with no width limit)")
 
     # Bar chart: count of each result type per attack
     pivot = df.groupby(["attack", "result"]).size().unstack(fill_value=0)
