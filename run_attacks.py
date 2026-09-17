@@ -1,18 +1,17 @@
 """
 run_attacks.py
 Real, dynamic, multi-turn PyRIT attacks using PyRIT's own attack
-strategies. Each entry in OBJECTIVES is a GOAL, not a literal prompt --
-PyRIT's adversarial LLM decides the actual wording and escalates the
-conversation to try to achieve it.
+strategies -- confirmed against Microsoft's official documentation.
+
+Each entry in OBJECTIVES is a GOAL, not a literal prompt. PyRIT's own
+attack strategies use a second LLM (adversarial_chat) to autonomously
+craft and escalate a full conversation with the target model, trying
+to achieve that goal:
 
   - PromptSendingAttack : single-turn baseline (no adversarial LLM)
   - RedTeamingAttack    : iterative multi-turn adversarial attack
   - CrescendoAttack     : gradual escalation, backtracks on refusal
   - TAPAttack           : tree-of-attacks-with-pruning
-
-Scope kept small (4 objectives, short turn counts) since the local
-model struggles to give PyRIT's built-in scorer clean JSON, causing
-retries that would otherwise make this take very long.
 
 Run after setup_ollama.py has finished.
 """
@@ -25,8 +24,8 @@ import matplotlib.pyplot as plt
 
 nest_asyncio.apply()
 
-# Suppress PyRIT's verbose internal retry/scorer logging -- this is
-# what was cluttering the output, not our own print statements.
+# Suppress PyRIT's verbose internal retry/scorer logging -- this is what
+# was cluttering the output, not our own print statements.
 logging.getLogger("pyrit").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.ERROR)
 
@@ -37,9 +36,11 @@ from pyrit.executor.attack import (
     CrescendoAttack,
     TAPAttack,
     AttackAdversarialConfig,
+    AttackScoringConfig,
 )
 from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.memory import CentralMemory
+from pyrit.score import SelfAskRefusalScorer
 
 OLLAMA_MODEL = "qa-assistant"
 
@@ -158,14 +159,23 @@ async def run():
         model_name=OLLAMA_MODEL,
     )
     adversarial_config = AttackAdversarialConfig(target=adversarial_chat)
+    scoring_config = AttackScoringConfig(objective_scorer=SelfAskRefusalScorer(chat_target=adversarial_chat))
+
+    print("Warming up model before starting attacks...")
+    try:
+        warmup = PromptSendingAttack(objective_target=target)
+        await warmup.execute_async(objective="Say hello.")
+        print("Model is warm. Starting attacks.\n")
+    except Exception as e:
+        print(f"[Warm-up call failed, continuing anyway: {e}]\n")
 
     attack_builders = {
         "PromptSendingAttack (single-turn baseline)":
             lambda: PromptSendingAttack(objective_target=target),
         "RedTeamingAttack (multi-turn adversarial)":
-            lambda: RedTeamingAttack(objective_target=target, attack_adversarial_config=adversarial_config, max_turns=2),
+            lambda: RedTeamingAttack(objective_target=target, attack_adversarial_config=adversarial_config, attack_scoring_config=scoring_config, max_turns=2),
         "CrescendoAttack (gradual escalation)":
-            lambda: CrescendoAttack(objective_target=target, attack_adversarial_config=adversarial_config, max_turns=2, max_backtracks=1),
+            lambda: CrescendoAttack(objective_target=target, attack_adversarial_config=adversarial_config, attack_scoring_config=scoring_config, max_turns=2, max_backtracks=1),
         "TAPAttack (tree-of-attacks pruning)":
             lambda: TAPAttack(objective_target=target, attack_adversarial_config=adversarial_config, tree_width=1, tree_depth=1),
     }
