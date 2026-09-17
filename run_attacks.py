@@ -64,78 +64,33 @@ def classify(text: str) -> str:
     return "VULNERABLE"
 
 
-def _piece_text(msg):
-    for attr in ("message_pieces", "pieces", "request_pieces"):
-        if hasattr(msg, attr):
-            plist = getattr(msg, attr)
-            if plist:
-                return str(plist[-1].converted_value)
-    return None
-
-
-def _deep_find_text(obj, exclude=None, depth=0, seen=None):
-    """Fallback: recursively search the whole result object for text
-    when the memory-based conversation lookup comes back empty."""
-    if seen is None:
-        seen = set()
-    if id(obj) in seen or depth > 3:
-        return None
-    seen.add(id(obj))
-    if isinstance(obj, str):
-        if exclude and obj.strip() == exclude.strip():
-            return None
-        return obj if len(obj.strip()) > 3 else None
-    candidates = []
-    for attr in dir(obj):
-        if attr.startswith("_"):
-            continue
-        try:
-            val = getattr(obj, attr)
-        except Exception:
-            continue
-        if callable(val):
-            continue
-        if isinstance(val, str):
-            found = _deep_find_text(val, exclude, depth + 1, seen)
-        elif isinstance(val, (list, tuple)):
-            for item in val:
-                f = _deep_find_text(item, exclude, depth + 1, seen)
-                if f:
-                    candidates.append(f)
-            continue
-        elif hasattr(val, "__dict__") or hasattr(val, "__dataclass_fields__"):
-            found = _deep_find_text(val, exclude, depth + 1, seen)
-        else:
-            found = None
-        if found:
-            candidates.append(found)
-    return max(candidates, key=len) if candidates else None
-
-
-def extract_full_conversation(result, objective_text: str) -> list:
-    """Tries memory first (real turn-by-turn conversation with roles).
-    If that comes back empty, falls back to pulling any text found
-    directly on the result object, tagged as a single assistant turn."""
+def extract_conversation_with_scores(result) -> list:
+    """Official PyRIT pattern (docs.microsoft.github.io/PyRIT/1.1.0/):
+    pull every prompt/response piece for the conversation, then attach
+    any scorer verdicts recorded against each piece."""
     conversation_id = getattr(result, "conversation_id", None)
-    turns = []
-    if conversation_id:
-        try:
-            memory = CentralMemory.get_memory_instance()
-            messages = memory.get_conversation(conversation_id=conversation_id)
-            for m in messages:
-                role = getattr(m, "role", "unknown")
-                text = _piece_text(m) or ""
-                if text.strip():
-                    turns.append({"role": role, "text": text})
-        except Exception:
-            pass
+    if not conversation_id:
+        return []
 
-    if not turns:
-        found = _deep_find_text(result, exclude=objective_text)
-        if found:
-            turns.append({"role": "assistant", "text": found})
+    try:
+        memory = CentralMemory.get_memory_instance()
+        pieces = memory.get_message_pieces(conversation_id=conversation_id)
+        piece_ids = [p.id for p in pieces]
+        scores = memory.get_scores_by_prompt_ids(prompt_request_response_ids=piece_ids)
+        score_by_piece = {s.prompt_request_response_id: s for s in scores}
 
-    return turns
+        turns = []
+        for p in pieces:
+            verdict = score_by_piece.get(p.id)
+            turns.append({
+                "role": p.role,
+                "text": p.converted_value,
+                "score_value": str(verdict.score_value) if verdict else None,
+                "score_rationale": verdict.score_rationale if verdict else None,
+            })
+        return turns
+    except Exception as e:
+        return [{"role": "error", "text": f"[MEMORY EXTRACTION FAILED: {e}]", "score_value": None, "score_rationale": None}]
 
 
 def extract_outcome(result) -> str:
@@ -190,13 +145,13 @@ class AIRedTeamingPipeline:
         try:
             attack = builder()
             result = await attack.execute_async(objective=objective_text)
-            conversation = extract_full_conversation(result, objective_text)
+            conversation = extract_conversation_with_scores(result)
             pyrit_outcome = extract_outcome(result)
         except Exception as e:
             conversation = []
             pyrit_outcome = "N/A"
 
-        last_reply = next((t["text"] for t in reversed(conversation) if t["role"] in ("assistant", "unknown")), "")
+        last_reply = next((t["text"] for t in reversed(conversation) if t["role"] == "assistant"), "")
         verdict = classify(last_reply)
 
         record = {
@@ -225,8 +180,9 @@ class AIRedTeamingPipeline:
 
                 if record["conversation"]:
                     for i, turn in enumerate(record["conversation"], 1):
-                        role_label = turn["role"].upper()
-                        print(f"  Turn {i} [{role_label}]: {turn['text'][:300]}")
+                        print(f"  Turn {i} [{turn['role'].upper()}]: {turn['text'][:250]}")
+                        if turn["score_value"] is not None:
+                            print(f"       verdict: {turn['score_value']} -- {turn['score_rationale']}")
                 else:
                     print(f"  (no conversation captured)")
 
@@ -255,7 +211,7 @@ class AIRedTeamingPipeline:
         }
         with open("red_team_report.json", "w") as f:
             json.dump(report, f, indent=2)
-        print("\nFull structured report (with conversations) saved to red_team_report.json")
+        print("\nFull structured report (with conversations + verdicts) saved to red_team_report.json")
 
         df.to_csv("attack_results.csv", index=False)
         print("Table saved to attack_results.csv")
