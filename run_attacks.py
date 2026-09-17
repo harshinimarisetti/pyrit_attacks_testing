@@ -8,14 +8,12 @@ attack strategies use a second LLM (adversarial_chat) to autonomously
 craft and escalate a full conversation with the target model, trying
 to achieve that goal:
 
-  - PromptSendingAttack     : single-turn baseline (no adversarial LLM)
-  - ContextComplianceAttack : rephrases the objective into a benign
-                              context via the adversarial LLM first
-  - RedTeamingAttack        : iterative multi-turn adversarial attack
-  - CrescendoAttack         : gradual escalation across turns, backtracks
-                              on refusal
-  - TAPAttack               : tree-of-attacks-with-pruning, explores
-                              multiple adversarial prompt paths
+  - PromptSendingAttack : single-turn baseline (no adversarial LLM)
+  - RedTeamingAttack    : iterative multi-turn adversarial attack
+  - CrescendoAttack     : gradual escalation across turns, backtracks
+                          on refusal
+  - TAPAttack           : tree-of-attacks-with-pruning, explores
+                          multiple adversarial prompt paths
 
 max_turns / tree_width / tree_depth are kept small since each turn is
 several LLM calls on CPU-only Ollama -- increase them for a deeper,
@@ -34,7 +32,6 @@ nest_asyncio.apply()
 from pyrit.setup import IN_MEMORY, initialize_pyrit_async
 from pyrit.executor.attack import (
     PromptSendingAttack,
-    ContextComplianceAttack,
     RedTeamingAttack,
     CrescendoAttack,
     TAPAttack,
@@ -165,8 +162,6 @@ async def run():
     attack_builders = {
         "PromptSendingAttack (single-turn baseline)":
             lambda: PromptSendingAttack(objective_target=target),
-        "ContextComplianceAttack (benign reframing)":
-            lambda: ContextComplianceAttack(objective_target=target, attack_adversarial_config=adversarial_config),
         "RedTeamingAttack (multi-turn adversarial)":
             lambda: RedTeamingAttack(objective_target=target, attack_adversarial_config=adversarial_config, max_turns=3),
         "CrescendoAttack (gradual escalation)":
