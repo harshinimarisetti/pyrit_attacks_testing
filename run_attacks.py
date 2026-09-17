@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime
 
+import requests
 import nest_asyncio
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -64,14 +66,34 @@ def classify(text: str) -> str:
     return "VULNERABLE"
 
 
+def warm_up_ollama(model=OLLAMA_MODEL, max_tries=8, delay=5) -> bool:
+    """Uses plain requests (not PyRIT) so it can retry through the brief
+    window while Ollama is still loading the model into memory."""
+    print("Warming up Ollama directly (plain HTTP, with retries)...")
+    for attempt in range(1, max_tries + 1):
+        try:
+            r = requests.post(
+                "http://localhost:11434/api/chat",
+                json={"model": model, "messages": [{"role": "user", "content": "hello"}], "stream": False},
+                timeout=60,
+            )
+            if r.status_code == 200:
+                print(f"Model responded successfully on attempt {attempt}.\n")
+                return True
+            print(f"Attempt {attempt}: status {r.status_code}, retrying...")
+        except Exception as e:
+            print(f"Attempt {attempt}: {type(e).__name__}: {e}, retrying...")
+        time.sleep(delay)
+    print("Model never responded after all retries -- attacks will likely fail.\n")
+    return False
+
+
 def extract_conversation_with_scores(result) -> list:
-    """Official PyRIT pattern (docs.microsoft.github.io/PyRIT/1.1.0/):
-    pull every prompt/response piece for the conversation, then attach
-    any scorer verdicts recorded against each piece."""
+    """Official PyRIT pattern: pull every prompt/response piece for the
+    conversation, then attach any scorer verdicts recorded against it."""
     conversation_id = getattr(result, "conversation_id", None)
     if not conversation_id:
         return []
-
     try:
         memory = CentralMemory.get_memory_instance()
         pieces = memory.get_message_pieces(conversation_id=conversation_id)
@@ -110,6 +132,11 @@ class AIRedTeamingPipeline:
         self.results = []
 
     async def setup(self):
+        # Warm up via plain HTTP FIRST, before touching PyRIT at all.
+        model_ready = warm_up_ollama(self.model_name)
+        if not model_ready:
+            print("[WARNING] Proceeding anyway, but expect failures.\n")
+
         await initialize_pyrit_async(memory_db_type=IN_MEMORY)
         self.target = OpenAIChatTarget(
             endpoint="http://localhost:11434/v1", api_key="ollama", model_name=self.model_name
@@ -118,13 +145,6 @@ class AIRedTeamingPipeline:
             endpoint="http://localhost:11434/v1", api_key="ollama", model_name=self.model_name
         )
         self.adversarial_config = AttackAdversarialConfig(target=self.adversarial_chat)
-
-        print("Warming up model...")
-        try:
-            await PromptSendingAttack(objective_target=self.target).execute_async(objective="Say hello.")
-            print("Model warm.\n")
-        except Exception as e:
-            print(f"[Warm-up failed, continuing: {e}]\n")
 
     def _scenarios_for(self, success_substring: str) -> dict:
         scoring_config = AttackScoringConfig(
