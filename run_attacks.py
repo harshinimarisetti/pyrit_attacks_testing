@@ -151,13 +151,11 @@ async def run():
         endpoint="http://localhost:11434/v1",
         api_key="ollama",
         model_name=OLLAMA_MODEL,
-        timeout=300,
     )
     adversarial_chat = OpenAIChatTarget(
         endpoint="http://localhost:11434/v1",
         api_key="ollama",
         model_name=OLLAMA_MODEL,
-        timeout=300,
     )
     adversarial_config = AttackAdversarialConfig(target=adversarial_chat)
 
