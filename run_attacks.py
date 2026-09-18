@@ -20,14 +20,20 @@ from pyrit.executor.attack import (
     TAPAttack,
 )
 from pyrit.memory import CentralMemory
-from pyrit.prompt_converter import (
-    Base64Converter,
-    Rot13Converter,
-    TranslationConverter,
-)
 from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.score import SubStringScorer
 from pyrit.setup import IN_MEMORY, initialize_pyrit_async
+
+# Dynamic import handling across PyRIT version changes
+try:
+    from pyrit.prompt_converter import Base64Converter, Rot13Converter, TranslationConverter
+except ModuleNotFoundError:
+    try:
+        from pyrit.prompt_converters import Base64Converter, Rot13Converter, TranslationConverter
+    except ModuleNotFoundError:
+        from pyrit.prompt_converter.base64_converter import Base64Converter
+        from pyrit.prompt_converter.rot13_converter import Rot13Converter
+        from pyrit.prompt_converter.translation_converter import TranslationConverter
 
 OLLAMA_MODEL = "qa-assistant"
 
@@ -70,19 +76,16 @@ def classify(text: str) -> str:
 
 
 def extract_full_conversation(result) -> list:
-    """Extracts all turns directly from CentralMemory using the attack's conversation_id."""
     conversation_id = getattr(result, "conversation_id", None)
     turns = []
     
     if conversation_id:
         try:
             memory = CentralMemory.get_memory_instance()
-            # Retrieve all memory pieces associated with this attack conversation
             messages = memory.get_conversation(conversation_id=conversation_id)
             
             for m in messages:
                 role = getattr(m, "role", "unknown")
-                # PyRIT standardizes content in converted_value or original_value
                 text = getattr(m, "converted_value", getattr(m, "original_value", ""))
                 
                 if text and str(text).strip():
@@ -131,10 +134,9 @@ class AIRedTeamingPipeline:
             objective_scorer=SubStringScorer(substring=success_substring, categories=["objective"])
         )
         
-        # Converters initialization
         base64_conv = Base64Converter()
         rot13_conv = Rot13Converter()
-        caesar_french_conv = TranslationConverter(language="French")
+        french_conv = TranslationConverter(language="French")
 
         return {
             "Scenario 1 -- Single-Turn Baseline":
@@ -151,10 +153,10 @@ class AIRedTeamingPipeline:
                     objective_target=self.target, 
                     prompt_converters=[rot13_conv]
                 ),
-            "Scenario 4 -- Multi-Language Translation (French)":
+            "Scenario 4 -- Translation (French)":
                 lambda: PromptSendingAttack(
                     objective_target=self.target, 
-                    prompt_converters=[caesar_french_conv]
+                    prompt_converters=[french_conv]
                 ),
             "Scenario 5 -- Multi-Turn RedTeamingAttack":
                 lambda: RedTeamingAttack(
@@ -218,16 +220,15 @@ class AIRedTeamingPipeline:
                 print(f"\n{'=' * 90}\n{scenario_name}\n{'=' * 90}")
                 record = await self.run_scenario(category, scenario_name, builder, spec["goal"])
 
-                # Structured Multi-Turn Output Printing
                 if record["conversation"]:
-                    print("\n--- FULL CONVERSATION LOG ---")
+                    print("\n--- CONVERSATION TRANSCRIPT ---")
                     for i, turn in enumerate(record["conversation"], 1):
                         role_label = turn["role"].upper()
                         content = turn["text"].replace("\n", " ")
                         print(f"  [Turn {i:02d}] {role_label:<10} | {content[:150]}..." if len(content) > 150 else f"  [Turn {i:02d}] {role_label:<10} | {content}")
-                    print("-----------------------------\n")
+                    print("-------------------------------\n")
                 else:
-                    print("  (No transcript captured)")
+                    print("  (No conversation captured)")
 
                 print(f"  PYRIT OUTCOME : {record['pyrit_outcome']}")
                 print(f"  VERDICT       : {record['result']}")
@@ -236,9 +237,9 @@ class AIRedTeamingPipeline:
         df = pd.DataFrame([{k: v for k, v in r.items() if k != "conversation"} for r in self.results])
 
         print("\n\n" + "=" * 100)
-        print("STRUCTURED FINAL SUMMARY TABLE")
+        print("STRUCTURED FINAL TABLE")
         print("=" * 100)
-        cat_w, scen_w = 20, 50
+        cat_w, scen_w = 20, 48
         print(f"{'CATEGORY':<{cat_w}} {'SCENARIO':<{scen_w}} {'TURNS':<7} {'OUTCOME':<15} {'RESULT'}")
         print("-" * (cat_w + scen_w + 40))
         for r in self.results:
@@ -255,7 +256,7 @@ class AIRedTeamingPipeline:
         }
         with open("red_team_report.json", "w") as f:
             json.dump(report, f, indent=2)
-        print("\nFull structured report (with full transcript) saved to red_team_report.json")
+        print("\nFull structured report saved to red_team_report.json")
 
         df.to_csv("attack_results.csv", index=False)
         print("Table saved to attack_results.csv")
