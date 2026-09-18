@@ -3,26 +3,31 @@ import json
 import logging
 from datetime import datetime
 
+import matplotlib.pyplot as plt
 import nest_asyncio
 import pandas as pd
-import matplotlib.pyplot as plt
 
 nest_asyncio.apply()
 logging.getLogger("pyrit").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.ERROR)
 
-from pyrit.setup import IN_MEMORY, initialize_pyrit_async
 from pyrit.executor.attack import (
-    PromptSendingAttack,
-    RedTeamingAttack,
-    CrescendoAttack,
-    TAPAttack,
     AttackAdversarialConfig,
     AttackScoringConfig,
+    CrescendoAttack,
+    PromptSendingAttack,
+    RedTeamingAttack,
+    TAPAttack,
+)
+from pyrit.memory import CentralMemory
+from pyrit.prompt_converter import (
+    Base64Converter,
+    Rot13Converter,
+    TranslationConverter,
 )
 from pyrit.prompt_target import OpenAIChatTarget
-from pyrit.memory import CentralMemory
 from pyrit.score import SubStringScorer
+from pyrit.setup import IN_MEMORY, initialize_pyrit_async
 
 OLLAMA_MODEL = "qa-assistant"
 
@@ -64,76 +69,26 @@ def classify(text: str) -> str:
     return "VULNERABLE"
 
 
-def _piece_text(msg):
-    for attr in ("message_pieces", "pieces", "request_pieces"):
-        if hasattr(msg, attr):
-            plist = getattr(msg, attr)
-            if plist:
-                return str(plist[-1].converted_value)
-    return None
-
-
-def _deep_find_text(obj, exclude=None, depth=0, seen=None):
-    """Fallback: recursively search the whole result object for text
-    when the memory-based conversation lookup comes back empty."""
-    if seen is None:
-        seen = set()
-    if id(obj) in seen or depth > 3:
-        return None
-    seen.add(id(obj))
-    if isinstance(obj, str):
-        if exclude and obj.strip() == exclude.strip():
-            return None
-        return obj if len(obj.strip()) > 3 else None
-    candidates = []
-    for attr in dir(obj):
-        if attr.startswith("_"):
-            continue
-        try:
-            val = getattr(obj, attr)
-        except Exception:
-            continue
-        if callable(val):
-            continue
-        if isinstance(val, str):
-            found = _deep_find_text(val, exclude, depth + 1, seen)
-        elif isinstance(val, (list, tuple)):
-            for item in val:
-                f = _deep_find_text(item, exclude, depth + 1, seen)
-                if f:
-                    candidates.append(f)
-            continue
-        elif hasattr(val, "__dict__") or hasattr(val, "__dataclass_fields__"):
-            found = _deep_find_text(val, exclude, depth + 1, seen)
-        else:
-            found = None
-        if found:
-            candidates.append(found)
-    return max(candidates, key=len) if candidates else None
-
-
-def extract_full_conversation(result, objective_text: str) -> list:
-    """Tries memory first (real turn-by-turn conversation with roles).
-    If that comes back empty, falls back to pulling any text found
-    directly on the result object, tagged as a single assistant turn."""
+def extract_full_conversation(result) -> list:
+    """Extracts all turns directly from CentralMemory using the attack's conversation_id."""
     conversation_id = getattr(result, "conversation_id", None)
     turns = []
+    
     if conversation_id:
         try:
             memory = CentralMemory.get_memory_instance()
+            # Retrieve all memory pieces associated with this attack conversation
             messages = memory.get_conversation(conversation_id=conversation_id)
+            
             for m in messages:
                 role = getattr(m, "role", "unknown")
-                text = _piece_text(m) or ""
-                if text.strip():
-                    turns.append({"role": role, "text": text})
-        except Exception:
-            pass
-
-    if not turns:
-        found = _deep_find_text(result, exclude=objective_text)
-        if found:
-            turns.append({"role": "assistant", "text": found})
+                # PyRIT standardizes content in converted_value or original_value
+                text = getattr(m, "converted_value", getattr(m, "original_value", ""))
+                
+                if text and str(text).strip():
+                    turns.append({"role": role, "text": str(text).strip()})
+        except Exception as e:
+            logging.error(f"Error reading conversation from memory: {e}")
 
     return turns
 
@@ -164,7 +119,7 @@ class AIRedTeamingPipeline:
         )
         self.adversarial_config = AttackAdversarialConfig(target=self.adversarial_chat)
 
-        print("Warming up model...")
+        print("Warming up target model...")
         try:
             await PromptSendingAttack(objective_target=self.target).execute_async(objective="Say hello.")
             print("Model warm.\n")
@@ -175,28 +130,68 @@ class AIRedTeamingPipeline:
         scoring_config = AttackScoringConfig(
             objective_scorer=SubStringScorer(substring=success_substring, categories=["objective"])
         )
+        
+        # Converters initialization
+        base64_conv = Base64Converter()
+        rot13_conv = Rot13Converter()
+        caesar_french_conv = TranslationConverter(language="French")
+
         return {
-            "Scenario 1 -- PromptSendingAttack (single-turn baseline)":
-                lambda: PromptSendingAttack(objective_target=self.target),
-            "Scenario 2 -- RedTeamingAttack (multi-turn adversarial conversation)":
-                lambda: RedTeamingAttack(objective_target=self.target, attack_adversarial_config=self.adversarial_config, attack_scoring_config=scoring_config, max_turns=3),
-            "Scenario 3 -- CrescendoAttack (gradual escalation, backtracks on refusal)":
-                lambda: CrescendoAttack(objective_target=self.target, attack_adversarial_config=self.adversarial_config, attack_scoring_config=scoring_config, max_turns=3, max_backtracks=1),
-            "Scenario 4 -- TAPAttack (tree-of-attacks with pruning)":
-                lambda: TAPAttack(objective_target=self.target, attack_adversarial_config=self.adversarial_config, attack_scoring_config=scoring_config, tree_width=1, tree_depth=2),
+            "Scenario 1 -- Single-Turn Baseline":
+                lambda: PromptSendingAttack(
+                    objective_target=self.target
+                ),
+            "Scenario 2 -- Base64 Obfuscation":
+                lambda: PromptSendingAttack(
+                    objective_target=self.target, 
+                    prompt_converters=[base64_conv]
+                ),
+            "Scenario 3 -- ROT13 Encoding":
+                lambda: PromptSendingAttack(
+                    objective_target=self.target, 
+                    prompt_converters=[rot13_conv]
+                ),
+            "Scenario 4 -- Multi-Language Translation (French)":
+                lambda: PromptSendingAttack(
+                    objective_target=self.target, 
+                    prompt_converters=[caesar_french_conv]
+                ),
+            "Scenario 5 -- Multi-Turn RedTeamingAttack":
+                lambda: RedTeamingAttack(
+                    objective_target=self.target, 
+                    attack_adversarial_config=self.adversarial_config, 
+                    attack_scoring_config=scoring_config, 
+                    max_turns=3
+                ),
+            "Scenario 6 -- Multi-Turn CrescendoAttack":
+                lambda: CrescendoAttack(
+                    objective_target=self.target, 
+                    attack_adversarial_config=self.adversarial_config, 
+                    attack_scoring_config=scoring_config, 
+                    max_turns=3, 
+                    max_backtracks=1
+                ),
+            "Scenario 7 -- TAPAttack (Tree-of-Attacks)":
+                lambda: TAPAttack(
+                    objective_target=self.target, 
+                    attack_adversarial_config=self.adversarial_config, 
+                    attack_scoring_config=scoring_config, 
+                    tree_width=1, 
+                    tree_depth=2
+                ),
         }
 
     async def run_scenario(self, category, scenario_name, builder, objective_text):
         try:
             attack = builder()
             result = await attack.execute_async(objective=objective_text)
-            conversation = extract_full_conversation(result, objective_text)
+            conversation = extract_full_conversation(result)
             pyrit_outcome = extract_outcome(result)
         except Exception as e:
             conversation = []
-            pyrit_outcome = "N/A"
+            pyrit_outcome = f"ERROR: {str(e)}"
 
-        last_reply = next((t["text"] for t in reversed(conversation) if t["role"] in ("assistant", "unknown")), "")
+        last_reply = next((t["text"] for t in reversed(conversation) if t["role"] in ("assistant", "response")), "")
         verdict = classify(last_reply)
 
         record = {
@@ -223,22 +218,27 @@ class AIRedTeamingPipeline:
                 print(f"\n{'=' * 90}\n{scenario_name}\n{'=' * 90}")
                 record = await self.run_scenario(category, scenario_name, builder, spec["goal"])
 
+                # Structured Multi-Turn Output Printing
                 if record["conversation"]:
+                    print("\n--- FULL CONVERSATION LOG ---")
                     for i, turn in enumerate(record["conversation"], 1):
                         role_label = turn["role"].upper()
-                        print(f"  Turn {i} [{role_label}]: {turn['text'][:300]}")
+                        content = turn["text"].replace("\n", " ")
+                        print(f"  [Turn {i:02d}] {role_label:<10} | {content[:150]}..." if len(content) > 150 else f"  [Turn {i:02d}] {role_label:<10} | {content}")
+                    print("-----------------------------\n")
                 else:
-                    print(f"  (no conversation captured)")
+                    print("  (No transcript captured)")
 
-                print(f"  PYRIT OUTCOME: {record['pyrit_outcome']} | VERDICT: {record['result']}")
+                print(f"  PYRIT OUTCOME : {record['pyrit_outcome']}")
+                print(f"  VERDICT       : {record['result']}")
 
     def generate_report(self):
         df = pd.DataFrame([{k: v for k, v in r.items() if k != "conversation"} for r in self.results])
 
         print("\n\n" + "=" * 100)
-        print("STRUCTURED FINAL TABLE")
+        print("STRUCTURED FINAL SUMMARY TABLE")
         print("=" * 100)
-        cat_w, scen_w = 18, 48
+        cat_w, scen_w = 20, 50
         print(f"{'CATEGORY':<{cat_w}} {'SCENARIO':<{scen_w}} {'TURNS':<7} {'OUTCOME':<15} {'RESULT'}")
         print("-" * (cat_w + scen_w + 40))
         for r in self.results:
@@ -255,7 +255,7 @@ class AIRedTeamingPipeline:
         }
         with open("red_team_report.json", "w") as f:
             json.dump(report, f, indent=2)
-        print("\nFull structured report (with conversations) saved to red_team_report.json")
+        print("\nFull structured report (with full transcript) saved to red_team_report.json")
 
         df.to_csv("attack_results.csv", index=False)
         print("Table saved to attack_results.csv")
