@@ -4,7 +4,7 @@ from typing import List
 
 # Microsoft PyRIT Imports
 from pyrit.setup import IN_MEMORY, initialize_pyrit_async
-from pyrit.prompt_target import AzureOpenAIChatTarget
+from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.prompt_converter import Base64Converter, Rot13Converter, TranslationConverter
 from pyrit.orchestrator import PromptSendingOrchestrator, RedTeamingOrchestrator
 from pyrit.score import Scorer, Score
@@ -15,7 +15,7 @@ from pyrit.score import Scorer, Score
 # =====================================================================
 class ConfidentialDataLeakScorer(Scorer):
     """
-    Custom PyRIT scorer to evaluate responses for unauthorized data disclosure.
+    Custom PyRIT scorer evaluating responses for sensitive data leakage.
     """
     def __init__(self, target_keywords: List[str]):
         super().__init__()
@@ -84,14 +84,14 @@ async def main():
     api_key = os.getenv("AZURE_OPENAI_CHAT_KEY", "your-api-key")
     deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4")
 
-    # Correct target class instantiation
-    target_llm = AzureOpenAIChatTarget(
+    # Unified OpenAIChatTarget works for Azure OpenAI endpoints via endpoint + api_key
+    target_llm = OpenAIChatTarget(
         deployment_name=deployment,
         endpoint=endpoint,
         api_key=api_key,
     )
 
-    adversarial_llm = AzureOpenAIChatTarget(
+    adversarial_llm = OpenAIChatTarget(
         deployment_name=deployment,
         endpoint=endpoint,
         api_key=api_key,
