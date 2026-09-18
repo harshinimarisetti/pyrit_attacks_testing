@@ -2,7 +2,7 @@ import asyncio
 import os
 from typing import List
 
-# Microsoft PyRIT Imports
+# Official Microsoft PyRIT Imports
 from pyrit.setup import IN_MEMORY, initialize_pyrit_async
 from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.prompt_converter import Base64Converter, ROT13Converter, TranslationConverter
