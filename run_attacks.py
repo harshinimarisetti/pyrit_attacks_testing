@@ -163,7 +163,7 @@ class AIRedTeamingPipeline:
         """2. Converters: transform the prompt before it reaches the
         target (encoding evasion, or language translation)."""
         return AttackConverterConfig(
-            request_converters=PromptConverterConfiguration.from_converters(converters=converters)
+            request_converters=ConverterConfiguration.from_converters(converters=converters)
         )
 
     def _scenarios_for(self, success_terms) -> dict:
