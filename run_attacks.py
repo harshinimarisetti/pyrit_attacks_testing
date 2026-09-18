@@ -24,7 +24,7 @@ from pyrit.executor.attack import (
     AttackConverterConfig,
 )
 from pyrit.prompt_target import OpenAIChatTarget
-from pyrit.prompt_converter import Base64Converter, ROT13Converter, TranslationConverter
+from pyrit.converter import Base64Converter, ROT13Converter, TranslationConverter
 from pyrit.prompt_normalizer import PromptConverterConfiguration
 from pyrit.memory import CentralMemory
 from pyrit.score import SubStringScorer, TrueFalseCompositeScorer
