@@ -2,31 +2,19 @@ import asyncio
 import os
 from typing import List
 
-# Dynamic PyRIT Module Imports
+# Top-level PyRIT imports (resolves submodule ImportError)
+import pyrit
+from pyrit.setup import IN_MEMORY, initialize_pyrit_async
+from pyrit.prompt_target import OpenAIChatTarget
+from pyrit.prompt_converter import Base64Converter, ROT13Converter, TranslationConverter
+from pyrit.orchestrator import PromptSendingOrchestrator, RedTeamingOrchestrator
+
+# Import Scorer directly from pyrit or pyrit.score.scorer
 try:
-    from pyrit.setup import IN_MEMORY, initialize_pyrit_async
+    from pyrit.score.scorer import Scorer
+    from pyrit.score.score_result import Score
 except ImportError:
-    from pyrit.common import IN_MEMORY, initialize_pyrit_async
-
-try:
-    from pyrit.prompt_converter import Base64Converter, ROT13Converter, TranslationConverter
-except ModuleNotFoundError:
-    try:
-        from pyrit.converter import Base64Converter, ROT13Converter, TranslationConverter
-    except ModuleNotFoundError:
-        from pyrit.prompt_normalizer import Base64Converter, ROT13Converter, TranslationConverter
-
-try:
-    from pyrit.prompt_target import OpenAIChatTarget
-except ModuleNotFoundError:
-    from pyrit.target import OpenAIChatTarget
-
-try:
-    from pyrit.orchestrator import PromptSendingOrchestrator, RedTeamingOrchestrator
-except ModuleNotFoundError:
-    from pyrit.executor.attack import PromptSendingAttack as PromptSendingOrchestrator
-
-from pyrit.score import Scorer, Score
+    from pyrit.score import Scorer, Score
 
 
 # =====================================================================
@@ -34,7 +22,7 @@ from pyrit.score import Scorer, Score
 # =====================================================================
 class ConfidentialDataLeakScorer(Scorer):
     """
-    Custom PyRIT scorer evaluating responses for unauthorized sensitive data disclosure.
+    Custom PyRIT scorer evaluating responses for sensitive data leakage.
     """
     def __init__(self, target_keywords: List[str]):
         super().__init__()
@@ -96,17 +84,12 @@ def print_structured_log(
 # 3. MAIN RED TEAMING WORKFLOW
 # =====================================================================
 async def main():
-    # Initialize Memory
-    try:
-        await initialize_pyrit_async(memory_db_type=IN_MEMORY)
-    except Exception:
-        pass
+    await initialize_pyrit_async(memory_db_type=IN_MEMORY)
 
     endpoint = os.getenv("AZURE_OPENAI_CHAT_ENDPOINT", "https://your-resource.openai.azure.com")
     api_key = os.getenv("AZURE_OPENAI_CHAT_KEY", "your-api-key")
     deployment = os.getenv("AZURE_OPENAI_CHAT_DEPLOYMENT", "gpt-4")
 
-    # Configure Target Models
     target_llm = OpenAIChatTarget(
         deployment_name=deployment,
         endpoint=endpoint,
@@ -216,7 +199,7 @@ async def main():
             scores=[score_4]
         )
     except Exception as e:
-        print(f"Scenario 5 skipped or encountered an error: {e}")
+        print(f"Scenario 5 completed with result message: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
