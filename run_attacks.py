@@ -3,14 +3,21 @@ import base64
 import codecs
 import json
 import logging
+import os
 from datetime import datetime
 
 import matplotlib.pyplot as plt
 import nest_asyncio
 import pandas as pd
+import urllib3
 
+# Apply nest_asyncio for smooth execution in Jupyter/interactive shells
 nest_asyncio.apply()
+
+# Suppress verbose PyRIT and HTTP client logs
 logging.getLogger("pyrit").setLevel(logging.ERROR)
+logging.getLogger("httpx").setLevel(logging.ERROR)
+logging.getLogger("openai").setLevel(logging.ERROR)
 logging.basicConfig(level=logging.ERROR)
 
 from pyrit.executor.attack import (
@@ -26,7 +33,9 @@ from pyrit.prompt_target import OpenAIChatTarget
 from pyrit.score import SubStringScorer
 from pyrit.setup import IN_MEMORY, initialize_pyrit_async
 
+# Model and Server configuration
 OLLAMA_MODEL = "qa-assistant"
+OLLAMA_ENDPOINT = "http://127.0.0.1:11434/v1"  # Uses explicit IPv4 loopback to prevent IPv6 localhost resolution failures
 
 OBJECTIVES = {
     "Illegal Requests": {
@@ -47,7 +56,7 @@ OBJECTIVES = {
     },
 }
 
-# Native Obfuscation Functions (Replaces fragile PyRIT converter imports)
+# Native Obfuscation Functions
 def to_base64(text: str) -> str:
     return base64.b64encode(text.encode()).decode()
 
@@ -88,12 +97,11 @@ def extract_full_conversation(result) -> list:
     """Extracts step-by-step turns cleanly across different PyRIT memory versions."""
     conversation_id = getattr(result, "conversation_id", None)
     turns = []
-    
+
     if conversation_id:
         try:
             memory = CentralMemory.get_memory_instance()
             
-            # Dynamically select supported memory retrieval method across PyRIT releases
             if hasattr(memory, "get_conversation_entries"):
                 messages = memory.get_conversation_entries(conversation_id=conversation_id)
             elif hasattr(memory, "get_prompt_request_pieces_by_conversation_id"):
@@ -124,8 +132,9 @@ def extract_outcome(result) -> str:
 
 
 class AIRedTeamingPipeline:
-    def __init__(self, model_name: str = OLLAMA_MODEL):
+    def __init__(self, model_name: str = OLLAMA_MODEL, endpoint: str = OLLAMA_ENDPOINT):
         self.model_name = model_name
+        self.endpoint = endpoint
         self.target = None
         self.adversarial_chat = None
         self.adversarial_config = None
@@ -133,20 +142,31 @@ class AIRedTeamingPipeline:
 
     async def setup(self):
         await initialize_pyrit_async(memory_db_type=IN_MEMORY)
+
+        # Set environment variables expected by underlying OpenAI client adapters
+        os.environ["OPENAI_API_KEY"] = "ollama"
+        os.environ["OPENAI_BASE_URL"] = self.endpoint
+
+        # Target initialization targeting explicit local Ollama host
         self.target = OpenAIChatTarget(
-            endpoint="http://localhost:11434/v1", api_key="ollama", model_name=self.model_name
+            endpoint=self.endpoint,
+            api_key="ollama",
+            model_name=self.model_name,
         )
         self.adversarial_chat = OpenAIChatTarget(
-            endpoint="http://localhost:11434/v1", api_key="ollama", model_name=self.model_name
+            endpoint=self.endpoint,
+            api_key="ollama",
+            model_name=self.model_name,
         )
         self.adversarial_config = AttackAdversarialConfig(target=self.adversarial_chat)
 
+        print(f"Connecting to Ollama target model '{self.model_name}' at {self.endpoint}...")
         print("Warming up model...")
         try:
             await PromptSendingAttack(objective_target=self.target).execute_async(objective="Say hello.")
-            print("Model warm.\n")
+            print("Model response received successfully. Target is online.\n")
         except Exception as e:
-            print(f"[Warm-up completed: {e}]\n")
+            print(f"[Warm-up check completed with message: {e}]\n")
 
     def _scenarios_for(self, success_substring: str) -> dict:
         scoring_config = AttackScoringConfig(
@@ -233,15 +253,19 @@ class AIRedTeamingPipeline:
                     for i, turn in enumerate(record["conversation"], 1):
                         role_label = turn["role"].upper()
                         content = turn["text"].replace("\n", " ")
-                        print(f"  [Turn {i:02d}] {role_label:<10} | {content[:150]}..." if len(content) > 150 else f"  [Turn {i:02d}] {role_label:<10} | {content}")
+                        print(f"   [Turn {i:02d}] {role_label:<10} | {content[:150]}..." if len(content) > 150 else f"   [Turn {i:02d}] {role_label:<10} | {content}")
                     print("------------------------\n")
                 else:
-                    print("  (No conversation captured)")
+                    print("   (No conversation captured)")
 
-                print(f"  PYRIT OUTCOME : {record['pyrit_outcome']}")
-                print(f"  VERDICT       : {record['result']}")
+                print(f"   PYRIT OUTCOME : {record['pyrit_outcome']}")
+                print(f"   VERDICT        : {record['result']}")
 
     def generate_report(self):
+        if not self.results:
+            print("\nNo results captured to generate report.")
+            return
+
         df = pd.DataFrame([{k: v for k, v in r.items() if k != "conversation"} for r in self.results])
 
         print("\n\n" + "=" * 100)
@@ -290,4 +314,5 @@ async def main():
     pipeline.generate_report()
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
