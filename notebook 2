@@ -1,0 +1,681 @@
+CELL 1 — MARKDOWN — Instructions
+
+Paste:
+
+# NVIDIA Garak LLM Security Testing
+
+This notebook runs NVIDIA Garak vulnerability testing against an Ollama LLM.
+
+## Before Running
+
+1. Make sure Ollama is installed and running.
+2. Make sure the target model is installed.
+3. Run `ollama list` to find the exact model name.
+4. Connect this notebook to the machine where Ollama is running.
+5. Run Cell 2 to install Garak.
+6. In Cell 3, update `TARGET_MODEL` with the exact Ollama model name.
+7. Run Cell 3.
+8. Wait until the Garak scan completes.
+9. Save the generated Garak reports for analysis.
+
+Only perform security testing against systems you are authorized to test.
+CELL 2 — CODE — Installation
+
+Paste:
+
+# =============================================================================
+# INSTALL GARAK
+# =============================================================================
+#
+# Run this cell once before starting the Garak security scan.
+#
+# garak  -> NVIDIA Generative AI Red-teaming & Assessment Kit
+# ollama -> Ollama Python integration
+#
+# =============================================================================
+
+%pip install -U garak ollama
+
+print("\nInstallation completed successfully.")
+print("You can now run Cell 3.")
+CELL 3 — CODE — Complete Garak Execution
+
+Paste this entire code:
+
+# =============================================================================
+# NVIDIA GARAK — LLM SECURITY TEST
+# =============================================================================
+#
+# INSTRUCTIONS FOR TESTERS:
+#
+# 1. Make sure Ollama is running.
+#
+# 2. Run:
+#
+#       ollama list
+#
+# 3. Copy the exact model name.
+#
+# 4. Update TARGET_MODEL below.
+#
+# 5. Run this cell.
+#
+# The code will automatically:
+#
+#   - Check the Ollama connection
+#   - Check the target model
+#   - Run Garak
+#   - Run Garak vulnerability probes
+#   - Save the raw Garak report
+#   - Create a structured JSON report
+#
+# =============================================================================
+
+
+import subprocess
+import sys
+import json
+
+from pathlib import Path
+from datetime import datetime
+from urllib.request import urlopen
+
+
+# =============================================================================
+# CLIENT CONFIGURATION
+# =============================================================================
+
+
+# Ollama server.
+#
+# Normally DO NOT change this.
+#
+OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+
+
+# =============================================================================
+# TARGET MODEL
+# =============================================================================
+#
+# CLIENT:
+#
+# Change this value to the EXACT model name shown by:
+#
+#     ollama list
+#
+# Example:
+#
+#     llama3:8b-instruct-fp16
+#
+# =============================================================================
+
+TARGET_MODEL = "llama3:8b-instruct-fp16"
+
+
+# =============================================================================
+# GARAK EXECUTION SETTINGS
+# =============================================================================
+#
+# Keep concurrency at 1 when running against local Ollama.
+#
+# This reduces load on the Ollama server.
+#
+# =============================================================================
+
+PARALLEL_REQUESTS = 1
+
+PARALLEL_ATTEMPTS = 1
+
+
+# Garak report name.
+
+REPORT_PREFIX = "garak_full_scan"
+
+
+# =============================================================================
+# DISPLAY CONFIGURATION
+# =============================================================================
+
+print("=" * 80)
+
+print("NVIDIA GARAK LLM SECURITY TEST")
+
+print("=" * 80)
+
+print("Target model :", TARGET_MODEL)
+
+print("Ollama URL   :", OLLAMA_BASE_URL)
+
+print("=" * 80)
+
+
+# =============================================================================
+# STEP 1 — CHECK OLLAMA
+# =============================================================================
+#
+# This verifies that the Ollama server is running.
+#
+# If this fails:
+#
+#   1. Check that Ollama is running.
+#   2. Run `ollama list`.
+#   3. Verify that this notebook can access the machine running Ollama.
+#
+# =============================================================================
+
+print("\n[STEP 1] Checking Ollama connection...")
+
+
+try:
+
+    with urlopen(
+        f"{OLLAMA_BASE_URL}/api/tags",
+        timeout=10,
+    ) as response:
+
+        ollama_data = json.loads(
+            response.read().decode(
+                "utf-8"
+            )
+        )
+
+
+except Exception as e:
+
+    raise RuntimeError(
+
+        "\nUnable to connect to Ollama.\n\n"
+
+        "Please check:\n"
+
+        "1. Ollama is running.\n"
+
+        "2. The notebook is connected to the machine running Ollama.\n"
+
+        "3. Ollama is available at http://127.0.0.1:11434\n\n"
+
+        f"Original error: {e}"
+
+    )
+
+
+print("Ollama connection: SUCCESS")
+
+
+# =============================================================================
+# STEP 2 — CHECK TARGET MODEL
+# =============================================================================
+
+installed_models = {
+
+    model.get("name")
+
+    for model in ollama_data.get(
+        "models",
+        [],
+    )
+
+}
+
+
+print("\nAvailable Ollama models:")
+
+
+for model in sorted(
+    installed_models
+):
+
+    print(
+        " -",
+        model,
+    )
+
+
+print(
+    "\n[STEP 2] Checking target model..."
+)
+
+
+if TARGET_MODEL not in installed_models:
+
+    raise RuntimeError(
+
+        f"\nTarget model '{TARGET_MODEL}' was not found.\n\n"
+
+        "Run `ollama list` and copy the exact model name "
+        "into TARGET_MODEL at the top of this cell."
+
+    )
+
+
+print(
+    "Target model found:",
+    TARGET_MODEL,
+)
+
+
+# =============================================================================
+# STEP 3 — RUN GARAK
+# =============================================================================
+#
+# Garak will now send vulnerability-testing prompts to the target model.
+#
+# The scan can take time depending on:
+#
+#   - Number of probes
+#   - Model size
+#   - Hardware
+#   - CPU/GPU availability
+#
+# Keep this cell running until Garak finishes.
+#
+# =============================================================================
+
+
+print("\n" + "=" * 80)
+
+print("[STEP 3] STARTING GARAK SECURITY SCAN")
+
+print("=" * 80)
+
+
+command = [
+
+    sys.executable,
+
+    "-m",
+    "garak",
+
+    "--target_type",
+    "ollama",
+
+    "--target_name",
+    TARGET_MODEL,
+
+    "--parallel_requests",
+    str(
+        PARALLEL_REQUESTS
+    ),
+
+    "--parallel_attempts",
+    str(
+        PARALLEL_ATTEMPTS
+    ),
+
+    "--report_prefix",
+    REPORT_PREFIX,
+
+]
+
+
+process = subprocess.Popen(
+
+    command,
+
+    stdout=subprocess.PIPE,
+
+    stderr=subprocess.STDOUT,
+
+    text=True,
+
+    bufsize=1,
+
+)
+
+
+# Display Garak output live.
+
+for line in process.stdout:
+
+    print(
+        line,
+        end="",
+    )
+
+
+return_code = process.wait()
+
+
+print(
+    "\nGarak exit code:",
+    return_code,
+)
+
+
+# =============================================================================
+# STEP 4 — FIND GARAK REPORT
+# =============================================================================
+#
+# Garak generates its native report as JSONL.
+#
+# We locate the latest generated report automatically.
+#
+# =============================================================================
+
+
+print(
+    "\n[STEP 4] Locating Garak report..."
+)
+
+
+reports = sorted(
+
+    Path(".").glob(
+        "*.report.jsonl"
+    ),
+
+    key=lambda path:
+        path.stat().st_mtime,
+
+    reverse=True,
+
+)
+
+
+if not reports:
+
+    raise FileNotFoundError(
+
+        "Garak finished but no .report.jsonl file was found.\n"
+
+        "Check garak.log for details."
+
+    )
+
+
+raw_report = reports[0]
+
+
+print(
+    "Raw Garak report:"
+)
+
+print(
+    raw_report.resolve()
+)
+
+
+# =============================================================================
+# STEP 5 — CREATE STRUCTURED JSON OUTPUT
+# =============================================================================
+#
+# The original Garak JSONL report is preserved.
+#
+# We additionally create a normal JSON document that can be used
+# by client reporting/analysis tools.
+#
+# =============================================================================
+
+
+print(
+    "\n[STEP 5] Creating structured JSON report..."
+)
+
+
+results = []
+
+
+with open(
+
+    raw_report,
+
+    "r",
+
+    encoding="utf-8",
+
+) as file:
+
+
+    for line in file:
+
+
+        line = line.strip()
+
+
+        if not line:
+
+            continue
+
+
+        try:
+
+            results.append(
+
+                json.loads(
+                    line
+                )
+
+            )
+
+
+        except json.JSONDecodeError:
+
+            pass
+
+
+# =============================================================================
+# STRUCTURED REPORT
+# =============================================================================
+
+
+structured_report = {
+
+
+    "scanner":
+
+        "NVIDIA Garak",
+
+
+    "target": {
+
+
+        "type":
+
+            "ollama",
+
+
+        "model":
+
+            TARGET_MODEL,
+
+
+        "endpoint":
+
+            OLLAMA_BASE_URL,
+
+    },
+
+
+    "scan": {
+
+
+        "timestamp":
+
+            datetime.now().isoformat(),
+
+
+        "exit_code":
+
+            return_code,
+
+
+        "parallel_requests":
+
+            PARALLEL_REQUESTS,
+
+
+        "parallel_attempts":
+
+            PARALLEL_ATTEMPTS,
+
+    },
+
+
+    "summary": {
+
+
+        "total_report_entries":
+
+            len(
+                results
+            ),
+
+    },
+
+
+    "results":
+
+        results,
+
+}
+
+
+# =============================================================================
+# CREATE OUTPUT DIRECTORY
+# =============================================================================
+
+
+output_directory = Path(
+    "garak_results"
+)
+
+
+output_directory.mkdir(
+    exist_ok=True
+)
+
+
+structured_path = (
+
+    output_directory
+
+    / "garak_structured_results.json"
+
+)
+
+
+# =============================================================================
+# SAVE STRUCTURED REPORT
+# =============================================================================
+
+
+with open(
+
+    structured_path,
+
+    "w",
+
+    encoding="utf-8",
+
+) as file:
+
+
+    json.dump(
+
+        structured_report,
+
+        file,
+
+        indent=2,
+
+        ensure_ascii=False,
+
+    )
+
+
+# =============================================================================
+# FINAL RESULT
+# =============================================================================
+
+
+print("\n" + "=" * 80)
+
+print("GARAK SECURITY SCAN COMPLETE")
+
+print("=" * 80)
+
+
+print(
+    "\nTarget model:"
+)
+
+print(
+    TARGET_MODEL
+)
+
+
+print(
+    "\nRaw Garak report:"
+)
+
+print(
+    raw_report.resolve()
+)
+
+
+print(
+    "\nStructured JSON report:"
+)
+
+print(
+    structured_path.resolve()
+)
+
+
+# Check whether Garak also generated a log.
+
+garak_log = Path(
+    "garak.log"
+)
+
+
+if garak_log.exists():
+
+    print(
+        "\nGarak log:"
+    )
+
+    print(
+        garak_log.resolve()
+    )
+
+
+print(
+    "\nTotal report entries:",
+    len(
+        results
+    )
+)
+
+
+print(
+    "\nGarak exit code:",
+    return_code
+)
+
+
+if return_code == 0:
+
+    print(
+        "\nSTATUS: SUCCESS"
+    )
+
+else:
+
+    print(
+        "\nSTATUS: COMPLETED WITH ERRORS"
+    )
+
+    print(
+        "Review garak.log and the console output."
+    )
+
+
+print("\n" + "=" * 80)
+
+print(
+    "TESTER: Please retain the generated reports "
+    "for security assessment/reporting."
+)
+
+print("=" * 80)
