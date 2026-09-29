@@ -1,0 +1,155 @@
+NOTEBOOK 1 — PyRIT + Garak
+
+Name:
+
+PyRIT_Garak_Testing.ipynb
+
+CELL 1 — MARKDOWN — Instructions
+
+Create a Text/Markdown cell and paste:
+
+# PyRIT + Garak LLM Security Testing
+
+This notebook runs Microsoft PyRIT attacks followed by NVIDIA Garak security testing against an Ollama LLM.
+
+## Before Running
+
+1. Make sure Ollama is installed and running.
+2. Make sure the target model is available in Ollama.
+3. Run `ollama list` on your machine to check the exact model name.
+4. Connect this notebook to the machine where Ollama is running.
+5. Run Cell 2 to install the required Python packages.
+6. In Cell 3, update only:
+   - `OBJECTIVE_MODEL_NAME` — model being tested
+   - `ADVERSARIAL_MODEL_NAME` — model PyRIT uses to generate attacks
+7. Run Cell 3.
+8. When the PyRIT menu appears:
+   - Enter `1` to `13` for an individual attack
+   - Enter `ALL` to execute all PyRIT attacks
+9. Garak will run automatically after PyRIT completes.
+10. Save the generated reports for analysis.
+
+Only perform security testing against systems you are authorized to test.
+CELL 2 — CODE — Installation
+
+Create a Code cell and paste:
+
+# =============================================================================
+# INSTALL REQUIRED PACKAGES
+# =============================================================================
+#
+# Run this cell once before running the security tests.
+#
+# PyRIT        -> Microsoft AI Red Teaming framework
+# Garak        -> NVIDIA LLM vulnerability scanner
+# Ollama       -> Ollama Python integration
+# nest_asyncio -> Required for asynchronous execution inside notebooks
+#
+# =============================================================================
+
+%pip install -U pyrit garak ollama nest_asyncio
+
+print("\nInstallation completed successfully.")
+print("You can now run Cell 3.")
+CELL 3 — CODE — PyRIT + Garak
+
+This is where you paste the WHOLE PyRIT + Garak Python code we created.
+
+At the very top of that code, keep this:
+
+# =============================================================================
+# CLIENT CONFIGURATION
+# =============================================================================
+#
+# IMPORTANT FOR TESTERS:
+#
+# Change ONLY the model names below if required.
+#
+# Run `ollama list` and copy the exact model names.
+#
+# =============================================================================
+
+
+# Ollama endpoint.
+# Normally DO NOT change this.
+OLLAMA_ENDPOINT = "http://127.0.0.1:11434/api/chat"
+
+
+# =============================================================================
+# TARGET MODEL
+# =============================================================================
+#
+# This is the LLM that will be security tested.
+#
+# CLIENT: CHANGE THIS VALUE if required.
+#
+OBJECTIVE_MODEL_NAME = "llama3:8b-instruct-fp16"
+
+
+# =============================================================================
+# ADVERSARIAL MODEL
+# =============================================================================
+#
+# PyRIT uses this model to generate adversarial prompts for
+# Crescendo, TAP, PAIR, Red Teaming, etc.
+#
+# CLIENT: CHANGE THIS VALUE if required.
+#
+ADVERSARIAL_MODEL_NAME = "qwen2.5:3b"
+
+
+# =============================================================================
+# GARAK CONFIGURATION
+# =============================================================================
+#
+# These Garak probe families will run after PyRIT.
+#
+GARAK_DEFAULT_PROBES = [
+    "promptinject",
+    "jailbreak",
+    "encoding",
+]
+
+
+print("=" * 80)
+print("PYRIT + GARAK SECURITY TEST")
+print("=" * 80)
+
+print("Target model      :", OBJECTIVE_MODEL_NAME)
+print("Adversarial model :", ADVERSARIAL_MODEL_NAME)
+print("Ollama endpoint   :", OLLAMA_ENDPOINT)
+
+print("=" * 80)
+
+Then immediately after this configuration section, paste the entire PyRIT + Garak program.
+
+Your existing PyRIT program already contains the attack menu and all 13 attacks, so you do not need separate cells for each attack.
+
+IMPORTANT — End of Cell 3
+
+Because this is a notebook, at the bottom use:
+
+# =============================================================================
+# START SECURITY TESTING
+# =============================================================================
+#
+# No changes are required below.
+#
+# The execution order is:
+#
+#   1. Check Ollama
+#   2. Run PyRIT
+#   3. Generate PyRIT report
+#   4. Run Garak
+#   5. Generate Garak report
+#
+# =============================================================================
+
+nest_asyncio.apply()
+
+await main()
+
+Instead of:
+
+if __name__ == "__main__":
+    asyncio.run(main())
